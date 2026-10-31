@@ -553,7 +553,7 @@ C_AMBER = "#fdb927"            # logo wing (light end)
 C_LINE = "#c9dded"
 C_GLASS = "#f4f8ff"            # inner colour of every glass card; must stay
                                # equal to the background of the logo PNG
-C_FALLBACK = "#e3f0fa"         # shown for a split second before the gradient
+C_FALLBACK = "#e4eaf0"         # shown for a split second before the gradient
 
 GLASS_RGB = (244, 248, 255)
 GLASS_ALPHA = 1.0
@@ -666,21 +666,20 @@ def render_bg(w, h):
           .resize((sw, sh), Image.BILINEAR))
     diag = ImageChops.add(gv, gh, scale=2.0)
 
-    img = ImageOps.colorize(diag, black=(206, 232, 250),
-                            mid=(232, 243, 252), white=(255, 238, 222))
+    img = ImageOps.colorize(diag, black=(222, 231, 240),
+                            mid=(232, 238, 244), white=(238, 240, 243))
 
     blobs = (
-        (0.10, 0.12, 0.34, (150, 214, 232)),     # teal
-        (0.90, 0.28, 0.30, (160, 200, 245)),     # blue
-        (0.30, 1.00, 0.34, (255, 228, 172)),     # amber
-        (0.82, 0.98, 0.26, (255, 198, 165)),     # orange
+        (0.10, 0.12, 0.30, (205, 222, 236)),     # soft blue-grey
+        (0.90, 0.30, 0.28, (212, 224, 240)),     # soft blue
+        (0.30, 1.00, 0.30, (236, 232, 226)),     # warm grey
     )
     big = max(sw, sh)
 
     for fx, fy, fr, color in blobs:
         m = Image.new("L", (sw, sh), 0)
         cx, cy, r = fx * sw, fy * sh, fr * big
-        ImageDraw.Draw(m).ellipse((cx - r, cy - r, cx + r, cy + r), fill=190)
+        ImageDraw.Draw(m).ellipse((cx - r, cy - r, cx + r, cy + r), fill=150)
         m = m.filter(ImageFilter.GaussianBlur(big * 0.07))
         img.paste(color, (0, 0), m)
 
