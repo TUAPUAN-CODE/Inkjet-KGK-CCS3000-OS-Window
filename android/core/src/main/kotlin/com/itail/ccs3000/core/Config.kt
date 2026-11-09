@@ -13,6 +13,8 @@ data class AppConfig(
     val cameraFacing: String = "back",
     /** hide the on-screen keyboard when the scan box is focused (a USB / Bluetooth scanner types by itself) */
     val hideSoftKeyboard: Boolean = true,
+    /** "auto" | "ethernet" | "wifi" — which network the connection to the printer must use */
+    val network: String = "auto",
 ) {
     val fieldCount: Int get() = moduleNumbers.size
     val expectedLength: Int get() = moduleNumbers.size * digitsPerField
@@ -31,9 +33,11 @@ class SettingsInput(
     val moduleNumbers: String,
     val useChecksum: Boolean,
     val hideSoftKeyboard: Boolean,
+    val network: String = "auto",
 )
 
 object Settings {
+    val NETWORKS = listOf("auto", "ethernet", "wifi")
     val CODE_SYSTEMS = listOf("UNICODE", "ASCII", "SHIFT_JIS")
 
     /** Validates the settings form (unsaved values included). Returns the new config, or the error to show. */
@@ -63,6 +67,7 @@ object Settings {
             printerIp = ip, printerPort = port, digitsPerField = digits, messageNo = messageNo,
             codeSystem = if (input.codeSystem in CODE_SYSTEMS) input.codeSystem else base.codeSystem,
             moduleNumbers = modules, useChecksum = input.useChecksum, hideSoftKeyboard = input.hideSoftKeyboard,
+            network = if (input.network in NETWORKS) input.network else "auto",
         )
         return cfg to null
     }

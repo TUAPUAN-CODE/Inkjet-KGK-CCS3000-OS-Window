@@ -22,6 +22,7 @@ class ConfigStore(context: Context) {
             codeSystem = prefs.getString("codeSystem", d.codeSystem) ?: d.codeSystem,
             cameraFacing = prefs.getString("camera", d.cameraFacing) ?: d.cameraFacing,
             hideSoftKeyboard = prefs.getBoolean("hideKb", d.hideSoftKeyboard),
+            network = prefs.getString("network", d.network) ?: d.network,
         )
     }
 
@@ -30,7 +31,7 @@ class ConfigStore(context: Context) {
             .putString("ip", c.printerIp).putInt("port", c.printerPort).putBoolean("checksum", c.useChecksum)
             .putString("modules", c.moduleNumbers.joinToString(",")).putInt("messageNo", c.messageNo)
             .putInt("digits", c.digitsPerField).putString("codeSystem", c.codeSystem)
-            .putString("camera", c.cameraFacing).putBoolean("hideKb", c.hideSoftKeyboard)
+            .putString("network", c.network).putString("camera", c.cameraFacing).putBoolean("hideKb", c.hideSoftKeyboard)
             .apply()
     }
 }

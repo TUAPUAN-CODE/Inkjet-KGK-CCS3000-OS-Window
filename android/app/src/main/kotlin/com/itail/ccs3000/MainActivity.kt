@@ -248,9 +248,10 @@ private fun SettingsTab(vm: MainViewModel) {
     var codeSystem by remember(c) { mutableStateOf(c.codeSystem) }
     var checksum by remember(c) { mutableStateOf(c.useChecksum) }
     var hideKb by remember(c) { mutableStateOf(c.hideSoftKeyboard) }
+    var network by remember(c) { mutableStateOf(c.network) }
     var confirmTest by remember { mutableStateOf(false) }
 
-    fun form() = SettingsInput(ip, port, digits, msg, codeSystem, modules, checksum, hideKb)
+    fun form() = SettingsInput(ip, port, digits, msg, codeSystem, modules, checksum, hideKb, network)
 
     Column(Modifier.fillMaxSize().verticalScroll(rememberScrollState()).padding(16.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
         Card(colors = CardDefaults.cardColors(containerColor = Color.White)) {
@@ -271,6 +272,13 @@ private fun SettingsTab(vm: MainViewModel) {
                         FilterChip(selected = codeSystem == cs, onClick = { codeSystem = cs }, label = { Text(cs) })
                     }
                 }
+                Text("เครือข่ายที่ใช้ส่งไปเครื่องพิมพ์")
+                Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                    listOf("auto" to "อัตโนมัติ", "ethernet" to "สายแลน", "wifi" to "Wi-Fi").forEach { (k, label) ->
+                        FilterChip(selected = network == k, onClick = { network = k }, label = { Text(label) })
+                    }
+                }
+                Text("ต่อสายแลนตรงกับเครื่องพิมพ์: เลือก “สายแลน” แล้วตั้ง IP ตายตัวของแท็บเล็ตให้อยู่วงเดียวกับเครื่องพิมพ์", fontSize = 12.sp, color = Color.Gray)
                 Row(verticalAlignment = Alignment.CenterVertically) {
                     Switch(checksum, { checksum = it })
                     Spacer(Modifier.padding(horizontal = 6.dp))

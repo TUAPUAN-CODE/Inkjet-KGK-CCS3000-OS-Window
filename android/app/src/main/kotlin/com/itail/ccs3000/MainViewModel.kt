@@ -157,7 +157,7 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
             var error: String? = null
             val results: List<FieldResult> = withContext(Dispatchers.IO) {
                 try {
-                    Sender.sendFields(cfg.printerIp, cfg.printerPort, cfg.useChecksum, cfg.moduleNumbers, chunks, cfg.codeSystem)
+                    Sender.sendFields(cfg.printerIp, cfg.printerPort, cfg.useChecksum, cfg.moduleNumbers, chunks, cfg.codeSystem, factory = NetworkPicker.factory(getApplication(), cfg.network))
                 } catch (e: Exception) {
                     error = "เชื่อมต่อเครื่องพิมพ์ไม่ได้ (${cfg.printerIp}:${cfg.printerPort}): ${e.message ?: e.javaClass.simpleName}"
                     emptyList()
@@ -233,6 +233,7 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
                     Sender.sendFields(
                         cfg.printerIp, cfg.printerPort, cfg.useChecksum, cfg.moduleNumbers,
                         Sender.testTexts(cfg.moduleNumbers, cfg.digitsPerField), cfg.codeSystem,
+                        factory = NetworkPicker.factory(getApplication(), cfg.network),
                     )
                 } catch (e: Exception) {
                     error = e.message ?: e.javaClass.simpleName

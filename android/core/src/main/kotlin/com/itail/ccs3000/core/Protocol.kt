@@ -146,9 +146,10 @@ class SocketConnection(private val socket: Socket, private val timeoutMs: Int) :
     companion object { const val SHORT_WAIT_MS = 300 }
 }
 
-object SocketTransportFactory : TransportFactory {
+/** [newSocket] lets the app hand out sockets bound to a chosen network (Ethernet / Wi-Fi); the default uses the system's default route */
+class SocketTransportFactory(private val newSocket: () -> Socket = { Socket() }) : TransportFactory {
     override fun open(ip: String, port: Int, timeoutMs: Int): PrinterConnection {
-        val socket = Socket()
+        val socket = newSocket()
         try {
             socket.tcpNoDelay = true
             socket.connect(InetSocketAddress(ip, port), timeoutMs)

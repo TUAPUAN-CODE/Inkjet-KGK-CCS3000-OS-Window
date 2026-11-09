@@ -16,7 +16,7 @@ object Sender {
         chunks: List<String>,
         codeSystem: String,
         timeoutMs: Int = 5000,
-        factory: TransportFactory = SocketTransportFactory,
+        factory: TransportFactory = SocketTransportFactory(),
     ): List<FieldResult> {
         require(moduleNumbers.size == chunks.size) {
             "จำนวน module (${moduleNumbers.size}) ไม่ตรงกับจำนวน field (${chunks.size})"
