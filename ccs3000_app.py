@@ -33,6 +33,7 @@ Run:
 
 import base64
 import io
+import ipaddress
 import json
 import os
 import socket
@@ -63,6 +64,10 @@ CONFIG_PATH = os.path.join(BASE_DIR, "config.json")
 DEFAULT_CONFIG = {
     "printer_ip": "192.168.1.110",
     "printer_port": 1024,
+    # list of known printers (name -> ip/port); the user picks a NAME instead
+    # of typing an IP. printer_ip / printer_port always mirror the selected one.
+    "printers": [],
+    "printer_name": "",
     "use_checksum": True,
     "module_numbers": [497, 498, 499, 500],
     "message_no": 999,
@@ -101,16 +106,85 @@ def parse_module_numbers(text: str) -> list[int]:
     return modules
 
 
+def validate_printer(name, ip, port, others):
+    """Validates one entry of the printer list. Returns (name, ip, port).
+    `others` = names already in the list (excluding the entry being edited).
+    Raises ValueError with a Thai message."""
+
+    name = (name or "").strip()
+    ip = (ip or "").strip()
+
+    if not name:
+        raise ValueError("กรุณาระบุชื่อเครื่อง (Name)")
+    if len(name) > 40:
+        raise ValueError("ชื่อเครื่องยาวเกินไป (ไม่เกิน 40 ตัวอักษร)")
+    if name.lower() in [o.lower() for o in others]:
+        raise ValueError(f"มีชื่อ '{name}' อยู่ในรายการแล้ว")
+
+    try:
+        ip = str(ipaddress.IPv4Address(ip))
+    except ValueError:
+        raise ValueError(
+            f"IP ไม่ถูกต้อง: '{ip}' (ต้องเป็นรูปแบบ เช่น 192.168.1.110)")
+
+    try:
+        port = int(str(port).strip())
+    except ValueError:
+        raise ValueError("Port ต้องเป็นตัวเลข")
+    if not (1 <= port <= 65535):
+        raise ValueError("Port ต้องอยู่ระหว่าง 1-65535")
+
+    return name, ip, port
+
+
+def normalize_printers(cfg: dict) -> dict:
+    """Makes sure cfg has a valid printer list and a selected printer.
+    Old config files (only printer_ip / printer_port) become one entry."""
+
+    good = []
+    seen = set()
+    for item in cfg.get("printers") or []:
+        try:
+            n, ip, port = validate_printer(
+                item.get("name"), item.get("ip"), item.get("port"),
+                list(seen))
+        except (ValueError, AttributeError):
+            continue
+        seen.add(n)
+        good.append({"name": n, "ip": ip, "port": port})
+
+    if not good:
+        try:
+            _n, ip, port = validate_printer(
+                "x", cfg.get("printer_ip"), cfg.get("printer_port"), [])
+        except ValueError:
+            ip, port = "192.168.1.110", 1024
+        good = [{"name": "เครื่อง Ink 1", "ip": ip, "port": port}]
+
+    cfg["printers"] = good
+    chosen = next((p for p in good if p["name"] == cfg.get("printer_name")),
+                  None)
+    if chosen is None:
+        # keep the previously used address if it is in the list, else first
+        chosen = next((p for p in good
+                       if p["ip"] == cfg.get("printer_ip")
+                       and p["port"] == cfg.get("printer_port")), good[0])
+    cfg["printer_name"] = chosen["name"]
+    cfg["printer_ip"] = chosen["ip"]
+    cfg["printer_port"] = chosen["port"]
+    return cfg
+
+
 def load_config() -> dict:
+    cfg = DEFAULT_CONFIG.copy()
     if os.path.exists(CONFIG_PATH):
         try:
             with open(CONFIG_PATH, "r", encoding="utf-8") as f:
-                cfg = DEFAULT_CONFIG.copy()
                 cfg.update(json.load(f))
-                return cfg
         except (json.JSONDecodeError, OSError):
-            pass
-    return DEFAULT_CONFIG.copy()
+            cfg = DEFAULT_CONFIG.copy()
+    cfg["printers"] = [dict(p) for p in cfg.get("printers") or []]
+    return normalize_printers(cfg)
 
 
 def save_config(cfg: dict):
@@ -1480,7 +1554,8 @@ class App(GlassHost, tk.Tk):
 
     def _refresh_printer_label(self):
         self.printer_var.set(
-            f"เครื่องพิมพ์ {self.cfg['printer_ip']}:{self.cfg['printer_port']}"
+            f"เครื่องพิมพ์ {self.cfg['printer_name']} "
+            f"({self.cfg['printer_ip']}:{self.cfg['printer_port']})"
             f"  •  Module {','.join(str(n) for n in self.cfg['module_numbers'])}"
         )
 
@@ -2041,6 +2116,17 @@ class App(GlassHost, tk.Tk):
         ttk.Label(top, textvariable=self.count_var,
                   style="Muted.TLabel").pack(side="right")
 
+        # pick the printer by NAME (no IP typing)
+        self.scan_printer_var = tk.StringVar(value=self.cfg["printer_name"])
+        self.scan_printer_combo = ttk.Combobox(
+            top, textvariable=self.scan_printer_var, state="readonly",
+            width=22, values=[p["name"] for p in self.cfg["printers"]])
+        self.scan_printer_combo.pack(side="right", padx=(0, 16))
+        ttk.Label(top, text="ส่งไปเครื่อง:",
+                  style="Muted.TLabel").pack(side="right", padx=(0, 6))
+        self.scan_printer_combo.bind("<<ComboboxSelected>>",
+                                     self._on_scan_printer_selected)
+
         self.scan_var = tk.StringVar()
 
         self.entry_box = RoundBox(frame, radius=18, fill="#ffffff",
@@ -2478,13 +2564,40 @@ class App(GlassHost, tk.Tk):
             )
             self.vars[key] = var
 
-        add_field(1, 0, "printer_ip", "Printer IP")
-        add_field(1, 1, "printer_port", "Port", 8)
-        add_field(2, 0, "digits_per_field", "ตัวอักษร / field", 10)
-        add_field(2, 1, "message_no", "Message no.", 8)
+        # printer picked by NAME; IP / Port are shown read-only so they cannot
+        # be mistyped. Names are managed in the "จัดการรายชื่อเครื่อง" dialog.
+        ttk.Label(frame, text="เครื่องพิมพ์ (Name)").grid(
+            row=1, column=0, sticky="w", padx=(0, 8), pady=6)
+        self.vars["printer_name"] = tk.StringVar(
+            value=self.cfg["printer_name"])
+        self.printer_combo = ttk.Combobox(
+            frame, textvariable=self.vars["printer_name"], state="readonly",
+            width=24, values=[p["name"] for p in self.cfg["printers"]])
+        self.printer_combo.grid(row=1, column=1, sticky="ew", padx=(0, 20),
+                                pady=6)
+        self.printer_combo.bind("<<ComboboxSelected>>",
+                                self._on_settings_printer_selected)
+        GlassButton(frame, "จัดการรายชื่อเครื่อง", style="light", height=38,
+                    size=11, command=self.open_printer_manager).grid(
+            row=1, column=2, columnspan=2, sticky="w", pady=6)
+
+        def add_ro(row, col, key, label, width=12):
+            ttk.Label(frame, text=label).grid(
+                row=row, column=col * 2, sticky="w", padx=(0, 8), pady=6)
+            var = tk.StringVar(value=str(self.cfg[key]))
+            ttk.Entry(frame, textvariable=var, width=width,
+                      state="readonly").grid(
+                row=row, column=col * 2 + 1, sticky="ew", padx=(0, 20),
+                pady=6)
+            self.vars[key] = var
+
+        add_ro(2, 0, "printer_ip", "Printer IP")
+        add_ro(2, 1, "printer_port", "Port", 8)
+        add_field(3, 0, "digits_per_field", "ตัวอักษร / field", 10)
+        add_field(3, 1, "message_no", "Message no.", 8)
 
         ttk.Label(frame, text="Code system").grid(
-            row=3, column=0, sticky="w", padx=(0, 8), pady=6
+            row=4, column=0, sticky="w", padx=(0, 8), pady=6
         )
 
         self.vars["code_system"] = tk.StringVar(value=self.cfg["code_system"])
@@ -2494,11 +2607,11 @@ class App(GlassHost, tk.Tk):
             values=["UNICODE", "ASCII", "SHIFT_JIS"],
             width=14, state="readonly"
         )
-        self.code_combo.grid(row=3, column=1, sticky="ew", padx=(0, 20),
+        self.code_combo.grid(row=4, column=1, sticky="ew", padx=(0, 20),
                              pady=6)
 
         ttk.Label(frame, text="Module numbers").grid(
-            row=4, column=0, sticky="w", padx=(0, 8), pady=6
+            row=5, column=0, sticky="w", padx=(0, 8), pady=6
         )
 
         self.vars["module_numbers"] = tk.StringVar(
@@ -2508,17 +2621,17 @@ class App(GlassHost, tk.Tk):
         self.module_entry = ttk.Entry(
             frame, textvariable=self.vars["module_numbers"], width=40
         )
-        self.module_entry.grid(row=4, column=1, columnspan=3, sticky="ew",
+        self.module_entry.grid(row=5, column=1, columnspan=3, sticky="ew",
                                padx=(0, 20), pady=6)
 
         ttk.Label(
             frame,
             text="เช่น 497,498,499,500 (เรียงตาม field 1,2,3,...)",
             style="Muted.TLabel"
-        ).grid(row=5, column=1, columnspan=3, sticky="w")
+        ).grid(row=6, column=1, columnspan=3, sticky="w")
 
         btns = tk.Frame(frame, bg=C_GLASS)
-        btns.grid(row=6, column=0, columnspan=4, sticky="w", pady=(18, 0))
+        btns.grid(row=7, column=0, columnspan=4, sticky="w", pady=(18, 0))
 
         GlassButton(btns, "บันทึกการตั้งค่า", style="blue", height=46,
                     command=self.on_save_settings).pack(side="left")
@@ -2534,7 +2647,7 @@ class App(GlassHost, tk.Tk):
             frame, textvariable=self.test_result_var, bg=C_GLASS,
             fg=C_MUTED, font=(FONT, 11), justify="left", anchor="w",
             wraplength=800)
-        self.test_result_label.grid(row=7, column=0, columnspan=4,
+        self.test_result_label.grid(row=8, column=0, columnspan=4,
                                     sticky="we", pady=(16, 0))
 
         frame.bind(
@@ -2544,6 +2657,197 @@ class App(GlassHost, tk.Tk):
 
         for c in (1, 3):
             frame.columnconfigure(c, weight=1)
+
+    # -- printer list (Name -> IP) ---------------------------------------------
+
+    def _printer_by_name(self, name):
+        return next((p for p in self.cfg["printers"] if p["name"] == name),
+                    None)
+
+    def _apply_printer(self, name):
+        """Makes `name` the active printer (cfg + every selector + saved)."""
+
+        p = self._printer_by_name(name)
+        if p is None:
+            return
+        self.cfg["printer_name"] = p["name"]
+        self.cfg["printer_ip"] = p["ip"]
+        self.cfg["printer_port"] = p["port"]
+        save_config(self.cfg)
+        self._sync_printer_widgets()
+        self._refresh_printer_label()
+
+    def _sync_printer_widgets(self):
+        names = [p["name"] for p in self.cfg["printers"]]
+        self.scan_printer_combo.configure(values=names)
+        self.printer_combo.configure(values=names)
+        self.scan_printer_var.set(self.cfg["printer_name"])
+        self.vars["printer_name"].set(self.cfg["printer_name"])
+        self.vars["printer_ip"].set(self.cfg["printer_ip"])
+        self.vars["printer_port"].set(str(self.cfg["printer_port"]))
+
+    def _on_scan_printer_selected(self, _event=None):
+        name = self.scan_printer_var.get()
+        if self._sending or self._testing:
+            # never switch the target while a send / test is running
+            self.scan_printer_var.set(self.cfg["printer_name"])
+            return
+        self._apply_printer(name)
+        p = self._printer_by_name(name)
+        if p:
+            self.log(f"[printer] เลือกเครื่อง {p['name']} "
+                     f"({p['ip']}:{p['port']})")
+        self.scan_entry.focus_set()
+
+    def _on_settings_printer_selected(self, _event=None):
+        # only fills IP / Port in the form; saved with "บันทึกการตั้งค่า"
+        p = self._printer_by_name(self.vars["printer_name"].get())
+        if p:
+            self.vars["printer_ip"].set(p["ip"])
+            self.vars["printer_port"].set(str(p["port"]))
+
+    def open_printer_manager(self):
+        """Dialog to add / edit / delete the Name -> IP list."""
+
+        if getattr(self, "_pm_dialog", None) is not None:
+            try:
+                self._pm_dialog.lift()
+                return
+            except tk.TclError:
+                self._pm_dialog = None
+
+        dlg = tk.Toplevel(self)
+        self._pm_dialog = dlg
+        dlg.title("จัดการรายชื่อเครื่องพิมพ์ (Name → IP)")
+        dlg.transient(self)
+        dlg.resizable(False, False)
+        dlg.configure(bg=C_GLASS)
+
+        items = [dict(p) for p in self.cfg["printers"]]
+        selected = {"i": None}
+
+        tree = ttk.Treeview(dlg, columns=("name", "ip", "port"),
+                            show="headings", height=8, selectmode="browse")
+        for col, text, w in (("name", "ชื่อเครื่อง", 200),
+                             ("ip", "IP", 140), ("port", "Port", 70)):
+            tree.heading(col, text=text)
+            tree.column(col, width=w, anchor="w")
+        tree.grid(row=0, column=0, columnspan=4, padx=14, pady=(14, 8))
+
+        name_var, ip_var, port_var = (tk.StringVar(), tk.StringVar(),
+                                      tk.StringVar(value="1024"))
+        for r, (label, var, w) in enumerate((("ชื่อเครื่อง", name_var, 28),
+                                             ("IP", ip_var, 28),
+                                             ("Port", port_var, 10)), 1):
+            ttk.Label(dlg, text=label).grid(row=r, column=0, sticky="w",
+                                            padx=(14, 8), pady=3)
+            ttk.Entry(dlg, textvariable=var, width=w).grid(
+                row=r, column=1, columnspan=3, sticky="w", pady=3)
+
+        def refresh():
+            tree.delete(*tree.get_children())
+            for i, p in enumerate(items):
+                tree.insert("", "end", iid=str(i),
+                            values=(p["name"], p["ip"], p["port"]))
+
+        def on_pick(_e=None):
+            sel = tree.selection()
+            if not sel:
+                return
+            i = int(sel[0])
+            selected["i"] = i
+            name_var.set(items[i]["name"])
+            ip_var.set(items[i]["ip"])
+            port_var.set(str(items[i]["port"]))
+
+        def others(skip=None):
+            return [p["name"] for j, p in enumerate(items) if j != skip]
+
+        def add():
+            try:
+                n, ip, port = validate_printer(
+                    name_var.get(), ip_var.get(), port_var.get(), others())
+            except ValueError as e:
+                messagebox.showerror("ข้อมูลไม่ถูกต้อง", str(e), parent=dlg)
+                return
+            items.append({"name": n, "ip": ip, "port": port})
+            selected["i"] = None
+            name_var.set("")
+            ip_var.set("")
+            refresh()
+
+        def update():
+            i = selected["i"]
+            if i is None or i >= len(items):
+                messagebox.showinfo("แก้ไข", "เลือกเครื่องในรายการก่อน",
+                                    parent=dlg)
+                return
+            try:
+                n, ip, port = validate_printer(
+                    name_var.get(), ip_var.get(), port_var.get(), others(i))
+            except ValueError as e:
+                messagebox.showerror("ข้อมูลไม่ถูกต้อง", str(e), parent=dlg)
+                return
+            items[i] = {"name": n, "ip": ip, "port": port}
+            refresh()
+
+        def delete():
+            i = selected["i"]
+            if i is None or i >= len(items):
+                messagebox.showinfo("ลบ", "เลือกเครื่องในรายการก่อน",
+                                    parent=dlg)
+                return
+            if len(items) <= 1:
+                messagebox.showerror("ลบไม่ได้",
+                                     "ต้องมีเครื่องอย่างน้อย 1 เครื่อง",
+                                     parent=dlg)
+                return
+            if not messagebox.askyesno(
+                    "ลบเครื่อง", f"ลบ '{items[i]['name']}' ออกจากรายการ?",
+                    parent=dlg):
+                return
+            del items[i]
+            selected["i"] = None
+            refresh()
+
+        def close():
+            self._pm_dialog = None
+            dlg.destroy()
+
+        def save():
+            if self._sending or self._testing:
+                messagebox.showinfo("รอสักครู่",
+                                    "กำลังส่ง/ทดสอบอยู่ ลองใหม่ภายหลัง",
+                                    parent=dlg)
+                return
+            self.cfg["printers"] = [dict(p) for p in items]
+            normalize_printers(self.cfg)
+            save_config(self.cfg)
+            self._sync_printer_widgets()
+            self._refresh_printer_label()
+            self.log(f"[printer] บันทึกรายชื่อเครื่อง {len(items)} เครื่อง "
+                     f"• ใช้ {self.cfg['printer_name']}")
+            close()
+
+        tree.bind("<<TreeviewSelect>>", on_pick)
+        refresh()
+
+        row = tk.Frame(dlg, bg=C_GLASS)
+        row.grid(row=4, column=0, columnspan=4, pady=(10, 4))
+        ttk.Button(row, text="เพิ่ม", command=add).pack(side="left", padx=4)
+        ttk.Button(row, text="แก้ไข", command=update).pack(side="left",
+                                                           padx=4)
+        ttk.Button(row, text="ลบ", command=delete).pack(side="left", padx=4)
+
+        row2 = tk.Frame(dlg, bg=C_GLASS)
+        row2.grid(row=5, column=0, columnspan=4, pady=(6, 14))
+        ttk.Button(row2, text="บันทึกรายชื่อ", command=save).pack(
+            side="left", padx=6)
+        ttk.Button(row2, text="ยกเลิก", command=close).pack(side="left",
+                                                           padx=6)
+
+        dlg.protocol("WM_DELETE_WINDOW", close)
+        dlg.grab_set()
 
     def _read_settings_form(self):
         """Validate the settings form (unsaved values included).
@@ -2593,6 +2897,7 @@ class App(GlassHost, tk.Tk):
             return None
 
         return {
+            "printer_name": self.vars["printer_name"].get(),
             "printer_ip": printer_ip,
             "printer_port": printer_port,
             "digits_per_field": digits_per_field,
@@ -2732,7 +3037,9 @@ class App(GlassHost, tk.Tk):
             return
 
         self.cfg.update(form)
+        normalize_printers(self.cfg)
         save_config(self.cfg)
+        self._sync_printer_widgets()
 
         module_numbers = form["module_numbers"]
         digits_per_field = form["digits_per_field"]
