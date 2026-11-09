@@ -4,3 +4,10 @@ build/
 dist/
 config.json
 .venv/
+
+# Android
+.gradle/
+local.properties
+*.apk
+*.aab
+.idea/
