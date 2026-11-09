@@ -50,3 +50,23 @@ pyinstaller CCS3000.spec
 | `ccs3000_app.py` | หน้าจอแอป, การสแกน, การแบ่งข้อมูล, ส่งข้อมูล |
 | `ccs3000_comm.py` | โปรโตคอลสื่อสารของเครื่องพิมพ์ (STX/ETX, Checksum, คำสั่ง STM) |
 | `CCS3000.spec` | ตั้งค่า PyInstaller |
+
+---
+
+## Android Tablet (แอป Android)
+
+โฟลเดอร์ `android/` คือแอป Android (Kotlin + Jetpack Compose) สำหรับแท็บเล็ต ทำงานเหมือนเวอร์ชัน Windows: ใช้โปรโตคอล CCS3000 ชุดเดียวกัน (STM, UNICODE hex, checksum) ส่งเข้า Text module ของเครื่องพิมพ์ผ่าน LAN
+
+**ความสามารถ**
+- สแกน QR / Barcode ด้วย **กล้อง** (สลับหน้า/หลังได้) หรือด้วย **เครื่องสแกน USB / Bluetooth** (ทำงานเหมือนคีย์บอร์ด จบด้วย Enter)
+- เติมช่องว่างท้ายให้ครบ แบ่งเป็น field ละ N ตัว แล้วส่งเข้า module ตามลำดับ (debounce 80/200 ms เหมือน Windows)
+- หน้าตั้งค่า (IP, Port, หมายเลข module, ตัวอักษรต่อ field, Message no., Code system, Checksum) และ **ทดสอบการเชื่อมต่อ** (ส่ง `TEST M<n>` เข้าทุก module — มีหน้าต่างยืนยันก่อน)
+- ส่งซ้ำข้อมูลล่าสุด (ปุ่ม / F5), ล้าง (ปุ่ม / Esc), F2 กลับช่องสแกน, แถบสถานะสี, ตารางผลต่อ module, Log
+
+**ติดตั้ง**
+1. ไปที่แท็บ *Actions* → workflow **Android APK** → เปิดรอบล่าสุดที่เขียว → ดาวน์โหลด artifact `ccs3000-ink-tablet-apk` (หรือไฟล์ในหน้า *Releases* เมื่อ push tag `android-v1.0.0`)
+2. คัดลอก `ccs3000-ink-tablet.apk` ไปที่แท็บเล็ต เปิดไฟล์แล้วอนุญาต “ติดตั้งแอปจากแหล่งที่ไม่รู้จัก”
+3. เปิดแอป → แท็บ **ตั้งค่า** ใส่ IP/Port ของเครื่องพิมพ์ → **ทดสอบการเชื่อมต่อ** → **บันทึก**
+4. แท็บเล็ตต้องอยู่ในเครือข่าย LAN เดียวกับเครื่องพิมพ์ (Wi-Fi) · ครั้งแรกที่กด “สแกนด้วยกล้อง” แอปจะขอสิทธิ์กล้อง
+
+**Build เอง**: ต้องใช้ JDK 17 + Android SDK 34 → `cd android && ./gradlew :core:test :app:assembleDebug` (APK อยู่ที่ `android/app/build/outputs/apk/debug/`) — โมดูล `:core` (โปรโตคอล/payload/sender) เป็น Kotlin ล้วน ทดสอบได้โดยไม่ต้องมี Android SDK
